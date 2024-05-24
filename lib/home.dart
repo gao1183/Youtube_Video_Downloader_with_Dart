@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_downloader/video.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:flutter_ffmpeg/flutter_ffmpeg.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -22,12 +23,12 @@ class _HomeState extends State<Home> {
         const AndroidInitializationSettings("@mipmap/ic_launcher");
     var kurulumAyar = InitializationSettings(android: androidAyar);
     await flp.initialize(kurulumAyar,
-        onDidReceiveNotificationResponse: bildirimSecildi);
+        onDidReceiveNotificationResponse: notificationSelected);
   }
 
   /*-----------------------------------------------------------------------------------*/
 
-  Future<void> bildirimGoster(
+  Future<void> showNotification(
       String title, String progress, bool sessiz) async {
     var androidBildirimDetay = AndroidNotificationDetails(
       "channelId",
@@ -38,13 +39,13 @@ class _HomeState extends State<Home> {
       silent: sessiz,
     );
 
-    var bildirimDetay = NotificationDetails(android: androidBildirimDetay);
-    flp.show(0, title, progress, bildirimDetay, payload: title);
+    var notificationDetail = NotificationDetails(android: androidBildirimDetay);
+    flp.show(0, title, progress, notificationDetail, payload: title);
   }
 
   /*-----------------------------------------------------------------------------------*/
 
-  Future<void> bildirimSecildi(
+  Future<void> notificationSelected(
       NotificationResponse notificationResponse) async {
     var payload = notificationResponse.payload;
     var id = notificationResponse.id;
@@ -72,7 +73,7 @@ class _HomeState extends State<Home> {
     return buyukKontrol;
   }
 
-  Future<Video1?> VideoBilgi(String url) async {
+  Future<Video1?> VideoInfo(String url) async {
     var yt = YoutubeExplode();
     var path = '/storage/emulated/0/Download';
     var video = await yt.videos.get(url);
@@ -96,8 +97,8 @@ class _HomeState extends State<Home> {
 
   /*-----------------------------------------------------------------------------------*/
 
-  Future<void> indirMp4(VideoId id, String title) async {
-    bildirimGoster("indirme basliyor", title, false);
+  Future<void> downloadMp4(VideoId id, String title) async {
+    showNotification("indirme basliyor", title, false);
     String duzgunTitle = await uft8Convert(title);
     print(duzgunTitle);
     var yt = YoutubeExplode();
@@ -122,9 +123,10 @@ class _HomeState extends State<Home> {
 
         if (inenMgBytes != newProgress) {
           newProgress = inenMgBytes;
-          bildirimGoster(title, "%$newProgress", true).then((value) => (value) {
-                flp.cancelAll();
-              });
+          showNotification(title, "%$newProgress", true)
+              .then((value) => (value) {
+                    flp.cancelAll();
+                  });
         }
 
         print("data : $inenMgBytes% --- inen : $inenMgBytes");
@@ -140,10 +142,10 @@ class _HomeState extends State<Home> {
         print("Video Baslik : $title -- id $id");
 
         flp.cancelAll();
-        await bildirimGoster(title, "Indirme Tamamlandi", false);
+        await showNotification(title, "download done", false);
       },
       onError: (error) {
-        bildirimGoster(duzgunTitle, "Hata olustu", false);
+        showNotification(duzgunTitle, "Hata olustu", false);
         print("Error : $error");
       },
       cancelOnError: true,
@@ -154,15 +156,15 @@ class _HomeState extends State<Home> {
 
   /*-----------------------------------------------------------------------------------*/
 
-  Future<void> indirMp3(VideoId id, String title) async {
-    bildirimGoster("indirme basliyor", title, false);
+  Future<void> downloadMp3(VideoId id, String title) async {
+    showNotification("indirme basliyor", title, false);
     String duzgunTitle = await uft8Convert(title);
     var yt = YoutubeExplode();
     var manifest = await yt.videos.streamsClient.getManifest(id);
     var streamInfo = manifest.audioOnly.withHighestBitrate();
 
     var stream = yt.videos.streamsClient.get(streamInfo);
-    var file = File('/storage/emulated/0/Download/$duzgunTitle.mp3');
+    var file = File('/storage/emulated/0/Download/$duzgunTitle.mp4');
     var fileStream = file.openWrite();
 
     var totalBytes = streamInfo.size.totalBytes; // toplam byte sayisi
@@ -172,6 +174,15 @@ class _HomeState extends State<Home> {
     tfController.text = "";
 
     print(totalMb);
+    var _flutterFFmpeg = FlutterFFmpeg();
+    var arguments = [
+      "-i",
+      file.path,
+      "-c:a",
+      "libmp3lame",
+      "-y",
+      file.path.replaceAll('.mp4', '.mp3')
+    ];
 
     stream.listen(
       (data) {
@@ -180,21 +191,26 @@ class _HomeState extends State<Home> {
 
         if (inenMgBytes != newProgress) {
           newProgress = inenMgBytes;
-          bildirimGoster(title, "%$newProgress", true).then((value) => (value) {
-                flp.cancelAll();
-              });
+          showNotification(title, "%$newProgress", true)
+              .then((value) => (value) {
+                    flp.cancelAll();
+                  });
         }
         fileStream.add(data);
       },
       onDone: () async {
         await fileStream.flush();
         await fileStream.close();
-        print("Video Baslik : $title -- id $id");
+        print("Video info : $title -- id $id");
         await flp.cancelAll();
-        bildirimGoster(title, "Indirme Tamamlandi", false);
+        await _flutterFFmpeg
+            .executeWithArguments(arguments)
+            .then((rc) => print("FFmpeg process exited with rc $rc"));
+        await file.delete();
+        showNotification(title, "download done", false);
       },
       onError: (error) {
-        bildirimGoster(duzgunTitle, "Hata olustu", false);
+        showNotification(duzgunTitle, "donwn error", false);
         print("Error : $error");
       },
       cancelOnError: true,
@@ -269,7 +285,7 @@ class _HomeState extends State<Home> {
                     context: context,
                     builder: (BuildContext context) {
                       return FutureBuilder(
-                        future: VideoBilgi(url),
+                        future: VideoInfo(url),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
@@ -287,14 +303,14 @@ class _HomeState extends State<Home> {
                               actions: [
                                 ElevatedButton(
                                     onPressed: () {
-                                      indirMp4(snapshot.data!.id,
+                                      downloadMp4(snapshot.data!.id,
                                           snapshot.data!.title);
                                     },
                                     child: Text(
                                         "MP4\n${snapshot.data?.mp4Size} mb")),
                                 ElevatedButton(
                                     onPressed: () {
-                                      indirMp3(snapshot.data!.id,
+                                      downloadMp3(snapshot.data!.id,
                                           snapshot.data!.title);
                                     },
                                     child: Text(
